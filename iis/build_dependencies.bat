@@ -4,20 +4,20 @@
 :: General paths
 @set WORK_DIR=%cd%\dependencies\build_dir
 @set OUTPUT_DIR=%cd%\dependencies\release_files
-@set SOURCE_DIR=%USERPROFILE%\Downloads
+@set SOURCE_DIR=E:\OpenSource\installers
 
 :: Aditional paths.
 @set PATH=%PATH%;c:\work\cmake-2.8.7-win32-x86\bin;"c:\program files\7-zip"
 
-@set PCRE=pcre-8.33.zip
+@set PCRE=pcre-8.39.zip
 @set ZLIB=zlib-1.2.8.tar.gz
 @set LIBXML2=libxml2-2.9.1.tar.gz
-@set LUA=lua-5.1.5.tar.gz
+@set LUA=lua-5.3.3.tar.gz
 @set CURL=curl-7.39.0.zip
-@set APACHE_SRC=httpd-2.4.6.tar.gz
-@set APACHE_BIN32=httpd-2.4.6-win32-VC11.zip
-@set APACHE_BIN64=httpd-2.4.6-win64-VC11.zip
-@set YAJL=lloyd-yajl-f4b2b1a.zip
+@set APACHE_SRC=httpd-2.4.25.tar.gz
+@set APACHE_BIN32=httpd-2.4.25-win32-VC11.zip
+@set APACHE_BIN64=httpd-2.4.25-win64-VC11.zip
+@set YAJL=yajl-master.zip
 @set SSDEEP=ssdeep-2.10.tar.gz
 @set SSDEEP_BIN=ssdeep-2.10.zip
 
