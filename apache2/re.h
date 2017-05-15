@@ -312,6 +312,9 @@ struct msre_actionset {
     int                      log;
     int                      auditlog;
     int                      block;
+	apr_table_t             *t_actions;
+    apr_table_t             *nondisruptive_actions;
+    apr_table_t             *disruptive_actions;
 };
 
 void DSOLOCAL msre_engine_variable_register(msre_engine *engine, const char *name,

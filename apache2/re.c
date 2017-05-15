@@ -1223,6 +1223,9 @@ msre_actionset *msre_actionset_create(msre_engine *engine, apr_pool_t *mp, const
     actionset->auditlog = NOT_SET;
     actionset->log = NOT_SET;
 
+	actionset->t_actions = NULL;
+    actionset->nondisruptive_actions = NULL;
+    actionset->disruptive_actions = NULL;
     /* Parse the list of actions, if it's present */
     if (text != NULL) {
         int ret = msre_parse_actions(engine, mp, actionset, text, error_msg);
@@ -2485,7 +2488,7 @@ static void msre_perform_nondisruptive_actions(modsec_rec *msr, msre_rule *rule,
     const apr_table_entry_t *telts;
     int i;
 
-    tarr = apr_table_elts(actionset->actions);
+    tarr = apr_table_elts(actionset->nondisruptive_actions);
     telts = (const apr_table_entry_t*)tarr->elts;
     for (i = 0; i < tarr->nelts; i++) {
         msre_action *action = (msre_action *)telts[i].val;
@@ -2512,7 +2515,7 @@ static void msre_perform_disruptive_actions(modsec_rec *msr, msre_rule *rule,
      * disruptive actions need to do here is update the information
      * that will be used to act later.
      */
-    tarr = apr_table_elts(actionset->actions);
+    tarr = apr_table_elts(actionset->disruptive_actions);
     telts = (const apr_table_entry_t*)tarr->elts;
     for (i = 0; i < tarr->nelts; i++) {
         msre_action *action = (msre_action *)telts[i].val;
@@ -2988,48 +2991,36 @@ static apr_status_t msre_rule_process_normal(msre_rule *rule, modsec_rec *msr) {
             changed = 0;
             normtab = apr_table_make(mptmp, 10);
             if (normtab == NULL) return -1;
-            tarr = apr_table_elts(rule->actionset->actions);
+            tarr = apr_table_elts(rule->actionset->t_actions);
             telts = (const apr_table_entry_t*)tarr->elts;
 
             /* Build the final list of transformation functions. */
             for (k = 0; k < tarr->nelts; k++) {
                 action = (msre_action *)telts[k].val;
-
-                if (strcmp(telts[k].key, "t") == 0) {
-                    if (strcmp(action->param, "none") == 0) {
-                        apr_table_clear(normtab);
-                        tfnspath = NULL;
-                        tfnskey = NULL;
-                        tfnscount = 0;
-                        last_crec = NULL;
-                        last_cached_tfn = 0;
-                        continue;
-                    }
-
-                    if (action->param_plusminus == NEGATIVE_VALUE) {
-                        apr_table_unset(normtab, action->param);
-                    }
-                    else {
-                        tfnscount++;
-
-                        apr_table_addn(normtab, action->param, (void *)action);
+				if (action->param_plusminus == NEGATIVE_VALUE) {
+                    apr_table_unset(normtab, action->param);
+                }
+                else {
+                    tfnscount++;
+					apr_table_addn(normtab, action->param, (void *)action);
+					/* Check the cache, saving the 'most complete' as a
+                     * starting point -------modified here
+                     */
+                    if (usecache) {
+                        tfnspath = apr_psprintf(mptmp, "%s%s%s", (tfnspath?tfnspath:""), (tfnspath?",":""), action->param);
+                        tfnskey = apr_psprintf(mptmp, "%x;%s", tfnscount, tfnspath);
+                        crec = (msre_cache_rec *)apr_table_get(cachetab, tfnskey);
+						#ifdef CACHE_DEBUG
+                        msr_log(msr, 9, "CACHE: %s %s cached=%d", var->name, tfnskey, (crec ? 1 : 0));
+                        #endif
+                        
 
                         /* Check the cache, saving the 'most complete' as a
                          * starting point
                          */
-                        if (usecache) {
-                            tfnspath = apr_psprintf(mptmp, "%s%s%s", (tfnspath?tfnspath:""), (tfnspath?",":""), action->param);
-                            tfnskey = apr_psprintf(mptmp, "%x;%s", tfnscount, tfnspath);
-                            crec = (msre_cache_rec *)apr_table_get(cachetab, tfnskey);
-
-                            #ifdef CACHE_DEBUG
-                            msr_log(msr, 9, "CACHE: %s %s cached=%d", var->name, tfnskey, (crec ? 1 : 0));
-                            #endif
-
-                            if (crec != NULL) {
-                                last_crec = crec;
-                                last_cached_tfn = tfnscount;
-                            }
+                        if (crec != NULL) {
+                            last_crec = crec;
+                            last_cached_tfn = tfnscount;
                         }
                     }
                 }

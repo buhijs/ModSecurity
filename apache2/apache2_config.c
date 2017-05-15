@@ -926,7 +926,48 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
             dcfg->tmp_chain_starter = rule;
         }
     }
-
+	    {
+		const apr_array_header_t *tarr;
+		const apr_table_entry_t *telts;
+		int i;
+		
+        rule->actionset->t_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->t_actions)
+            return FATAL_ERROR;
+        
+        rule->actionset->nondisruptive_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->nondisruptive_actions) {
+            return FATAL_ERROR;
+        }
+        
+        rule->actionset->disruptive_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->disruptive_actions)
+            return FATAL_ERROR;
+        
+        tarr = apr_table_elts(rule->actionset->actions);
+        telts = (const apr_table_entry_t*)tarr->elts;
+        for (i = 0; i < tarr->nelts; i++) {
+            msre_action *action = (msre_action *)telts[i].val;
+            if (!strcmp(telts[i].key, "t")) {
+                if (!strcmp(action->param, "none")) {
+                    apr_table_clear(rule->actionset->t_actions);
+                    continue;
+                }
+                apr_table_addn(rule->actionset->t_actions, telts[i].key, (void *)action);
+                continue;
+            }
+            else
+            if (action->metadata->type == ACTION_NON_DISRUPTIVE) {
+                if (action->metadata->execute != NULL)
+                    apr_table_addn(rule->actionset->nondisruptive_actions, telts[i].key, (void *)action);
+            }
+            else
+            if (action->metadata->type == ACTION_DISRUPTIVE) {
+                if (action->metadata->execute != NULL)
+                    apr_table_addn(rule->actionset->disruptive_actions, telts[i].key, (void *)action);
+            }
+        }
+    }
     /* Create skip table if one does not already exist. */
     if (dcfg->tmp_rule_placeholders == NULL) {
         dcfg->tmp_rule_placeholders = apr_table_make(cmd->pool, 10);
