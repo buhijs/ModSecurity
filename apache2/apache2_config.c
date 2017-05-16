@@ -284,16 +284,25 @@ static int copy_rules(apr_pool_t *mp, msre_ruleset *parent_ruleset,
         goto failed;
     }
 
-    copy_rules_phase(mp, parent_ruleset->phase_request_headers,
-        child_ruleset->phase_request_headers, exceptions_arr);
-    copy_rules_phase(mp, parent_ruleset->phase_request_body,
-        child_ruleset->phase_request_body, exceptions_arr);
-    copy_rules_phase(mp, parent_ruleset->phase_response_headers,
-        child_ruleset->phase_response_headers, exceptions_arr);
-    copy_rules_phase(mp, parent_ruleset->phase_response_body,
-        child_ruleset->phase_response_body, exceptions_arr);
-    copy_rules_phase(mp, parent_ruleset->phase_logging,
-        child_ruleset->phase_logging, exceptions_arr);
+	if (exceptions_arr->nelts) {
+		copy_rules_phase(mp, parent_ruleset->phase_request_headers,
+			child_ruleset->phase_request_headers, exceptions_arr);
+		copy_rules_phase(mp, parent_ruleset->phase_request_body,
+			child_ruleset->phase_request_body, exceptions_arr);
+		copy_rules_phase(mp, parent_ruleset->phase_response_headers,
+			child_ruleset->phase_response_headers, exceptions_arr);
+		copy_rules_phase(mp, parent_ruleset->phase_response_body,
+			child_ruleset->phase_response_body, exceptions_arr);
+		copy_rules_phase(mp, parent_ruleset->phase_logging,
+			child_ruleset->phase_logging, exceptions_arr);
+	}
+	else {
+        child_ruleset->phase_request_headers = parent_ruleset->phase_request_headers;
+        child_ruleset->phase_request_body = parent_ruleset->phase_request_body;
+        child_ruleset->phase_response_headers = parent_ruleset->phase_response_headers;
+        child_ruleset->phase_response_body = parent_ruleset->phase_response_body;
+        child_ruleset->phase_logging = parent_ruleset->phase_logging;
+	}
 
 failed:
     return ret;
