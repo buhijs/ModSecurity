@@ -761,6 +761,21 @@ static int var_tx_generate(modsec_rec *msr, msre_var *var, msre_rule *rule,
     const apr_table_entry_t *te = NULL;
     int i, count = 0;
 
+    if (var->param && !var->param_data) {
+        msc_string *str = (msc_string *)apr_table_get(msr->tx_vars, var->param);
+        if (str) {
+            msre_var *rvar = apr_pmemdup(mptmp, var, sizeof(msre_var));
+
+            rvar->value = str->value;
+            rvar->value_len = str->value_len;
+            rvar->name = apr_psprintf(mptmp, "TX:%s", log_escape_nq_ex(mptmp, str->name, str->name_len));
+            apr_table_addn(vartab, rvar->name, (void *)rvar);
+
+            count++;
+        }
+        return count;
+    }
+    
     arr = apr_table_elts(msr->tx_vars);
     te = (apr_table_entry_t *)arr->elts;
     for (i = 0; i < arr->nelts; i++) {
