@@ -284,29 +284,133 @@ static int copy_rules(apr_pool_t *mp, msre_ruleset *parent_ruleset,
         goto failed;
     }
 
-	if (exceptions_arr->nelts) {
-		copy_rules_phase(mp, parent_ruleset->phase_request_headers,
-			child_ruleset->phase_request_headers, exceptions_arr);
-		copy_rules_phase(mp, parent_ruleset->phase_request_body,
-			child_ruleset->phase_request_body, exceptions_arr);
-		copy_rules_phase(mp, parent_ruleset->phase_response_headers,
-			child_ruleset->phase_response_headers, exceptions_arr);
-		copy_rules_phase(mp, parent_ruleset->phase_response_body,
-			child_ruleset->phase_response_body, exceptions_arr);
-		copy_rules_phase(mp, parent_ruleset->phase_logging,
-			child_ruleset->phase_logging, exceptions_arr);
-	}
-	else {
+    if (exceptions_arr->nelts) {
+        copy_rules_phase(mp, parent_ruleset->phase_request_headers,
+            child_ruleset->phase_request_headers, exceptions_arr);
+        copy_rules_phase(mp, parent_ruleset->phase_request_body,
+            child_ruleset->phase_request_body, exceptions_arr);
+        copy_rules_phase(mp, parent_ruleset->phase_response_headers,
+            child_ruleset->phase_response_headers, exceptions_arr);
+        copy_rules_phase(mp, parent_ruleset->phase_response_body,
+            child_ruleset->phase_response_body, exceptions_arr);
+        copy_rules_phase(mp, parent_ruleset->phase_logging,
+            child_ruleset->phase_logging, exceptions_arr);
+    }
+    else {
         child_ruleset->phase_request_headers = parent_ruleset->phase_request_headers;
         child_ruleset->phase_request_body = parent_ruleset->phase_request_body;
         child_ruleset->phase_response_headers = parent_ruleset->phase_response_headers;
         child_ruleset->phase_response_body = parent_ruleset->phase_response_body;
         child_ruleset->phase_logging = parent_ruleset->phase_logging;
-	}
+    }
 
 failed:
     return ret;
 }
+
+/**
+ * Create a transaction config and merge it with module's config. 
+ * Used to optimize the origin code of create txcfg and merge(txcfg, dcfg1)
+ * @param _child: merge the _child config into the new-created config.
+ * @return The new config, created in pool mp
+*/
+void * create_and_merge_directory_configs(apr_pool_t *mp, void *_child){
+    directory_config *merged = NULL;
+    directory_config *child  = _child;
+    
+    //merged = (directory_config *)apr_pcalloc(mp, sizeof(directory_config));
+    merged = (directory_config *)apr_pmemdup(mp, child, sizeof(directory_config));
+    if(merged == NULL)
+        return NULL;
+    
+    merged->mp = mp;
+    
+    #ifdef DEBUG_CONF
+        ap_log_perror(APLOG_MARK, APLOG_STARTUP|APLOG_NOERRNO, 0, mp, "Creage and merge from child %pp RESULT %pp", _child, merged);
+    #endif
+
+
+     if ((child->rule_inheritance == NOT_SET)||(child->rule_inheritance == 1)) {
+        merged->rule_inheritance = NOT_SET;
+        if ((child->ruleset == NULL)) {
+            #ifdef DEBUG_CONF
+            ap_log_perror(APLOG_MARK, APLOG_STARTUP|APLOG_NOERRNO, 0, mp, "No rules in this context.");
+            #endif
+        }else
+        {
+            #ifdef DEBUG_CONF
+            ap_log_perror(APLOG_MARK, APLOG_STARTUP|APLOG_NOERRNO, 0, mp, "Using child rules in this context.");
+            #endif
+            /* Copy child rules. */
+            merged->ruleset = msre_ruleset_create(child->ruleset->engine, mp);
+            merged->ruleset->phase_request_headers = apr_array_copy(mp,
+                child->ruleset->phase_request_headers);
+            merged->ruleset->phase_request_body = apr_array_copy(mp,
+                child->ruleset->phase_request_body);
+            merged->ruleset->phase_response_headers = apr_array_copy(mp,
+                child->ruleset->phase_response_headers);
+            merged->ruleset->phase_response_body = apr_array_copy(mp,
+                child->ruleset->phase_response_body);
+            merged->ruleset->phase_logging = apr_array_copy(mp,
+                child->ruleset->phase_logging);
+        } 
+    } else {
+        merged->rule_inheritance = 0;
+        if (child->ruleset != NULL) {
+            /* Copy child rules. */
+            merged->ruleset = msre_ruleset_create(child->ruleset->engine, mp);
+            merged->ruleset->phase_request_headers = apr_array_copy(mp,
+                child->ruleset->phase_request_headers);
+            merged->ruleset->phase_request_body = apr_array_copy(mp,
+                child->ruleset->phase_request_body);
+            merged->ruleset->phase_response_headers = apr_array_copy(mp,
+                child->ruleset->phase_response_headers);
+            merged->ruleset->phase_response_body = apr_array_copy(mp,
+                child->ruleset->phase_response_body);
+            merged->ruleset->phase_logging = apr_array_copy(mp,
+                child->ruleset->phase_logging);
+        }
+    }
+    
+    merged->rule_exceptions = apr_array_copy(mp, child->rule_exceptions);
+
+    merged->hash_method = apr_array_copy(mp, child->hash_method);
+    
+    if (child->of_mime_types != NOT_SET_P) {
+        if (child->of_mime_types_cleared != 1) {
+            merged->of_mime_types_cleared = NOT_SET;//new value
+        }
+    } else {
+        if (child->of_mime_types_cleared == 1) {
+            merged->of_mime_types = NOT_SET_P;//new
+        } else {
+            merged->of_mime_types_cleared = NOT_SET;//new
+        }
+    }
+
+    if (child->debuglog_fd == NOT_SET_P) {
+        merged->debuglog_name = NOT_SET_P;
+    }
+
+    if (child->auditlog_fd == NOT_SET_P) {
+        merged->auditlog_name = NOT_SET_P;
+    }
+    
+    if (child->auditlog2_fd != NOT_SET_P) {
+        merged->auditlog2_name = NOT_SET_P;
+    }
+
+    merged->tmp_chain_starter = NULL;
+    merged->tmp_default_actionset = NULL;
+    merged->tmp_rule_placeholders = NULL;
+
+    merged->rule_id_htab = apr_hash_make(mp);
+
+    merged->component_signatures = apr_array_copy(mp, child->component_signatures);
+    
+    return merged;
+}
+
 
 /**
  * Merges two directory configurations.
@@ -808,7 +912,7 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
     }
 
 #ifndef ALLOW_ID_NOT_UNIQUE
-	/* Rules must have uniq ID */
+    /* Rules must have uniq ID */
     type_rule = (dcfg->tmp_chain_starter == NULL);
 #if defined(WITH_LUA)
             type_rule = (type != RULE_TYPE_LUA && type_rule);
@@ -934,11 +1038,11 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
             dcfg->tmp_chain_starter = rule;
         }
     }
-	    {
-		const apr_array_header_t *tarr;
-		const apr_table_entry_t *telts;
-		int i;
-		
+        {
+        const apr_array_header_t *tarr;
+        const apr_table_entry_t *telts;
+        int i;
+        
         rule->actionset->t_actions = apr_table_make(cmd->pool, 25);
         if (!rule->actionset->t_actions)
             return FATAL_ERROR;
