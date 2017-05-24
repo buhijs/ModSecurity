@@ -1010,6 +1010,41 @@ const char *populate_include_files(apr_pool_t *p, apr_pool_t *ptemp, apr_array_h
 	return process_fnmatch_configs(ari, fname, p, ptemp, optional);
 }
 
+void update_skipafter_marker_index(apr_array_header_t *ruleset_arr){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    apr_array_header_t *action_tarr = NULL;
+    apr_table_entry_t *action_telts = NULL;
+    const char *marker = NULL;
+    int i,j;
+
+    for(i=0; i< ruleset_arr->nelts; i++){
+        msre_rule *rule = rules[i];
+        action_tarr = apr_table_elts(rule->actionset->actions);
+        action_telts = (apr_table_entry_t *)action_tarr->elts;
+
+        for(j = 0; j < action_tarr->nelts; j++){
+            msre_action *action = (msre_action *)action_telts[j].val;
+            /* Let's find out skipAfter action. */
+            if(strcmp(action->metadata->name, "skipAfter") == 0){
+                marker = action->param;
+                rule->skipafter_marker_index = find_skipafter_marker_index(ruleset_arr, i, marker);
+            }
+        }
+    }
+}
+
+int find_skipafter_marker_index(apr_array_header_t *ruleset_arr, int index, const char* marker){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    int i;
+    for(i = index; i < ruleset_arr->nelts; i++){
+        if(rules[i]->actionset->id == NULL)
+            continue;
+        if(strcmp(rules[i]->actionset->id, marker) == 0)
+            return i;
+    }
+    return NOT_SET;
+}
+
 const char *process_command_config(server_rec *s,
                                           void *mconfig,
                                           apr_pool_t *p,
@@ -1189,6 +1224,13 @@ ProcessInclude:
 							parms->config_file->line_number, errmsg);
 		else
 			apr_snprintf(err, 1024, "Syntax error in config file: %s", errmsg);
+    }else{
+        msre_ruleset* ruleset = ((directory_config *)mconfig)->ruleset;
+        update_skipafter_marker_index(ruleset->phase_request_headers);
+        update_skipafter_marker_index(ruleset->phase_request_body);
+        update_skipafter_marker_index(ruleset->phase_response_headers);
+        update_skipafter_marker_index(ruleset->phase_response_body);
+        update_skipafter_marker_index(ruleset->phase_logging);
     }
 
     errmsg = err;
@@ -1201,3 +1243,4 @@ Exit:
 
 	return errmsg;
 }
+

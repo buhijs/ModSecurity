@@ -153,6 +153,7 @@ struct msre_rule {
     int                      line_num;
     int                      placeholder;
     int                      type;
+    int                      skipafter_marker_index;
 
     msre_ruleset            *ruleset;
     msre_rule               *chain_starter;

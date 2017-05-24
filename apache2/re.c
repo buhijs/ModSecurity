@@ -1844,6 +1844,12 @@ static apr_status_t msre_ruleset_process_phase_(msre_ruleset *ruleset, modsec_re
             }
 
             if (rule->actionset->skip_after != NULL) {
+
+                if(rule->skipafter_marker_index != NOT_SET){
+                    i = rule->skipafter_marker_index;
+                    continue;
+                }
+                
                 skip_after = rule->actionset->skip_after;
                 mode = SKIP_RULES;
                 saw_starter = 1;
@@ -2369,6 +2375,7 @@ msre_rule *msre_rule_create(msre_ruleset *ruleset, int type,
     rule->p1 = apr_pstrdup(ruleset->mp, targets);
     rule->filename = apr_pstrdup(ruleset->mp, fn);
     rule->line_num = line;
+    rule->skipafter_marker_index = NOT_SET;
 
     /* Parse targets */
     rc = msre_parse_targets(ruleset, targets, rule->targets, &my_error_msg);
