@@ -146,6 +146,13 @@ struct msre_rule_op_lt_optimization {
 
 typedef struct msre_rule_op_lt_optimization msre_rule_op_lt_optimization;
 
+struct msre_rule_op_eq_optimization {
+    int preprocessor_var_value;
+    msc_string *var_value;
+};
+
+typedef struct msre_rule_op_eq_optimization msre_rule_op_eq_optimization;
+
 struct msre_rule {
     apr_array_header_t      *targets;
     const char              *op_name;
@@ -188,6 +195,7 @@ struct msre_rule {
 
     union {
         msre_rule_op_lt_optimization op_lt_opt;
+        msre_rule_op_eq_optimization op_eq_opt;
     };
 };
 

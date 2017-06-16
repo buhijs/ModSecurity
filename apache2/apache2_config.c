@@ -788,6 +788,31 @@ const char* preprocessor_rule_op_lt(cmd_parms *cmd, modsec_rec *msr, msre_rule *
     return NULL;
 }
 
+const char* preprocessor_rule_op_eq(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule) {
+
+    msc_string str;
+    str.value = (char*)rule->op_param;
+    str.value_len = strlen(str.value);
+
+    rule->op_eq_opt.preprocessor_var_value = preprocessor_expand_macros(msr, &str, rule, cmd->pool);
+    switch(rule->op_eq_opt.preprocessor_var_value) {
+    case 0: { // partial or none is expanded
+    case 1:   // all are expanded
+            rule->op_eq_opt.var_value = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            rule->op_eq_opt.var_value->value = apr_pstrdup(cmd->pool, str.value);
+            rule->op_eq_opt.var_value->value_len = str.value_len;
+        }
+        break;
+
+    default: { // critical error
+            return "ModSecurity: preprocessor_rule_op_eq critical error. ";
+        }
+        break;
+    }
+
+    return NULL;
+}
+
 const char* preprocessor_action_setvar(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule, msre_action *action) {
 
     char *data = apr_pstrdup(msr->mp, action->param);
@@ -1135,6 +1160,12 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
 
         if (!strcmp(rule->op_name, "lt")) {
             const char* err = preprocessor_rule_op_lt(cmd, &msr, rule);
+            if (err)
+                return err;
+        }
+        else
+        if (!strcmp(rule->op_name, "eq")) {
+            const char* err = preprocessor_rule_op_eq(cmd, &msr, rule);
             if (err)
                 return err;
         }
