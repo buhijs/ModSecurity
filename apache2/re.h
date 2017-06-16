@@ -312,7 +312,8 @@ struct msre_actionset {
     int                      log;
     int                      auditlog;
     int                      block;
-	apr_table_t             *t_actions;
+
+    apr_table_t             *t_actions;
     apr_table_t             *nondisruptive_actions;
     apr_table_t             *disruptive_actions;
 };
@@ -367,11 +368,25 @@ struct msre_action_metadata {
     fn_action_execute_t      execute;
 };
 
+struct msre_action_setvar_optimization {
+    int preprocessor_var_name;
+    int is_negated;
+    char* col_name;
+    msc_string *var_name;
+    int preprocessor_var_value;
+    msc_string *var_value;
+};
+
+typedef struct msre_action_setvar_optimization msre_action_setvar_optimization;
+
 struct msre_action {
     msre_action_metadata    *metadata;
     const char              *param;
     const void              *param_data;
     unsigned int             param_plusminus; /* ABSOLUTE_VALUE, POSITIVE_VALUE, NEGATIVE_VALUE */
+    union {
+        msre_action_setvar_optimization setvar_opt;
+    };
 };
 
 void DSOLOCAL msre_engine_reqbody_processor_register(msre_engine *engine,
