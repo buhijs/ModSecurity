@@ -139,6 +139,13 @@ int DSOLOCAL msre_ruleset_phase_rule_remove_with_exception(msre_ruleset *ruleset
 #define RULE_TYPE_LUA           3  /* SecRuleScript */
 #endif
 
+struct msre_rule_op_lt_optimization {
+    int preprocessor_var_value;
+    msc_string *var_value;
+};
+
+typedef struct msre_rule_op_lt_optimization msre_rule_op_lt_optimization;
+
 struct msre_rule {
     apr_array_header_t      *targets;
     const char              *op_name;
@@ -178,6 +185,10 @@ struct msre_rule {
     int                     escape_re;
 
     TreeRoot                *ip_op;
+
+    union {
+        msre_rule_op_lt_optimization op_lt_opt;
+    };
 };
 
 char DSOLOCAL *msre_rule_generate_unparsed(apr_pool_t *pool, const msre_rule *rule, const char *targets, const char *args, const char *actions);

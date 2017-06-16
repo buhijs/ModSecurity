@@ -4498,10 +4498,15 @@ static int msre_op_lt_execute(modsec_rec *msr, msre_rule *rule, msre_var *var,
         return 0;
     }
 
-    str.value = (char *)rule->op_param;
-    str.value_len = strlen(str.value);
+    if (!rule->op_lt_opt.preprocessor_var_value) {
+        str.value = (char *)rule->op_param;
+        str.value_len = strlen(str.value);
 
-    expand_macros(msr, &str, rule, msr->mp);
+        expand_macros(msr, &str, rule, msr->mp);
+    }
+    else {
+        str.value = rule->op_lt_opt.var_value->value;
+    }
 
     target = apr_pstrmemdup(msr->mp, var->value, var->value_len);
     if (target == NULL) return -1;

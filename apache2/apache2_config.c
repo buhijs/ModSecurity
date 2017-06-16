@@ -763,6 +763,31 @@ void init_directory_config(directory_config *dcfg)
 
 }
 
+const char* preprocessor_rule_op_lt(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule) {
+
+    msc_string str;
+    str.value = (char*)rule->op_param;
+    str.value_len = strlen(str.value);
+
+    rule->op_lt_opt.preprocessor_var_value = preprocessor_expand_macros(msr, &str, rule, cmd->pool);
+    switch(rule->op_lt_opt.preprocessor_var_value) {
+    case 0: { // partial or none is expanded
+    case 1:   // all are expanded
+            rule->op_lt_opt.var_value = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            rule->op_lt_opt.var_value->value = apr_pstrdup(cmd->pool, str.value);
+            rule->op_lt_opt.var_value->value_len = str.value_len;
+        }
+        break;
+
+    default: { // critical error
+            return "ModSecurity: preprocessor_rule_op_lt critical error. ";
+        }
+        break;
+    }
+
+    return NULL;
+}
+
 const char* preprocessor_action_setvar(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule, msre_action *action) {
 
     char *data = apr_pstrdup(msr->mp, action->param);
@@ -1107,6 +1132,12 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
         rule->actionset->disruptive_actions = apr_table_make(cmd->pool, 25);
         if (!rule->actionset->disruptive_actions)
             return FATAL_ERROR;
+
+        if (!strcmp(rule->op_name, "lt")) {
+            const char* err = preprocessor_rule_op_lt(cmd, &msr, rule);
+            if (err)
+                return err;
+        }
 
         tarr = apr_table_elts(rule->actionset->actions);
         telts = (const apr_table_entry_t*)tarr->elts;
