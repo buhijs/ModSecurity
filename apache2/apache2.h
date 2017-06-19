@@ -53,6 +53,8 @@ APR_DECLARE_OPTIONAL_FN(void, modsec_register_reqbody_processor, (const char *na
 
 /* Configuration functions. */
 
+void DSOLOCAL *create_and_merge_directory_configs(apr_pool_t *mp, void *_child);
+
 void DSOLOCAL *create_directory_config(apr_pool_t *mp, char *path);
 
 void DSOLOCAL *merge_directory_configs(apr_pool_t *mp, void *_parent, void *_child);

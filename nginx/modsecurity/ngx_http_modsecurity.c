@@ -24,7 +24,19 @@
 
 #include "api.h"
 
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #define NOTE_NGINX_REQUEST_CTX "nginx-ctx"
+
+#define TXID_HOSTNAME_SIZE    33 //32 char for name, 1 char for '\0'
+#define TXID_INT_SIZE        10
+#define TXID_SIZE             (TXID_HOSTNAME_SIZE + TXID_INT_SIZE + TXID_INT_SIZE + 2) // 1 host name, 1 request counter, 1 timestamp
+
+const char default_hostname_prefix[]="UnknownHost-";
+char default_hostname[TXID_HOSTNAME_SIZE];
+long global_request_counter = 0;
 
 typedef struct {
     ngx_flag_t                  enable;
@@ -59,7 +71,7 @@ static char *ngx_http_modsecurity_merge_loc_conf(ngx_conf_t *cf, void *parent, v
 static char *ngx_http_modsecurity_config(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_modsecurity_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
-static ngx_http_modsecurity_ctx_t * ngx_http_modsecurity_create_ctx(ngx_http_request_t *r);
+static ngx_http_modsecurity_ctx_t * ngx_http_modsecurity_create_ctx(ngx_http_request_t *r, int local_cnt);
 static int ngx_http_modsecurity_drop_action(request_rec *r);
 static void ngx_http_modsecurity_terminate(ngx_cycle_t *cycle);
 static void ngx_http_modsecurity_cleanup(void *data);
@@ -918,6 +930,8 @@ ngx_http_modsecurity_init(ngx_conf_t *cf)
 {
     ngx_http_handler_pt *h;
     ngx_http_core_main_conf_t *cmcf;
+    int i;
+    int default_hostname_prefix_len;
 
     modsecFinalizeConfig();
 
@@ -937,6 +951,14 @@ ngx_http_modsecurity_init(ngx_conf_t *cf)
 
     ngx_memzero(&ngx_http_modsecurity_upstream, sizeof(ngx_http_upstream_t));
     ngx_http_modsecurity_upstream.cacheable = 1;
+    
+    srand(time(0));
+    default_hostname_prefix_len = strlen(default_hostname_prefix);
+    strcpy(default_hostname,default_hostname_prefix);
+    for(i=default_hostname_prefix_len; i<TXID_HOSTNAME_SIZE-1; i++)
+        default_hostname[i] = '0' + rand()%10;
+    default_hostname[TXID_HOSTNAME_SIZE-1] = '\0';
+    
     return NGX_OK;
 }
 
@@ -960,7 +982,10 @@ ngx_http_modsecurity_handler(ngx_http_request_t *r)
     ngx_http_modsecurity_loc_conf_t *cf;
     ngx_http_modsecurity_ctx_t      *ctx;
     ngx_int_t                        rc;
-
+    long local_request_cnt;
+	
+    local_request_cnt = __sync_add_and_fetch(&global_request_counter,1);
+	
     cf = ngx_http_get_module_loc_conf(r, ngx_http_modsecurity);
 
     /* Process only main request */
@@ -984,7 +1009,7 @@ ngx_http_modsecurity_handler(ngx_http_request_t *r)
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "modSecurity: request pool ctx empty");
     }
 
-    ctx = ngx_http_modsecurity_create_ctx(r);
+    ctx = ngx_http_modsecurity_create_ctx(r, local_request_cnt);
     if (ctx == NULL) {
 
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -1215,19 +1240,16 @@ ngx_http_modsecurity_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     return ngx_http_next_body_filter(r, out);
 }
 
-#define TXID_SIZE 25
 
 static ngx_http_modsecurity_ctx_t *
-ngx_http_modsecurity_create_ctx(ngx_http_request_t *r)
+ngx_http_modsecurity_create_ctx(ngx_http_request_t *r, int local_cnt)
 {
     ngx_http_modsecurity_loc_conf_t *cf;
     ngx_pool_cleanup_t              *cln;
     ngx_http_modsecurity_ctx_t      *ctx;
-    apr_sockaddr_t                  *asa;
+    apr_sockaddr_t                  *asa = NULL;
     struct sockaddr_in              *sin;
-    char *txid;
-    unsigned char salt[TXID_SIZE];
-    int i;
+    clock_t timestamp;
 #if (NGX_HAVE_INET6)
     struct sockaddr_in6             *sin6;
 #endif
@@ -1301,27 +1323,13 @@ ngx_http_modsecurity_create_ctx(ngx_http_request_t *r)
     ctx->req = modsecNewRequest(ctx->connection, cf->config);
 
     apr_table_setn(ctx->req->notes, NOTE_NGINX_REQUEST_CTX, (const char *) ctx);
-    apr_generate_random_bytes(salt, TXID_SIZE);
-
-    txid = apr_pcalloc (ctx->req->pool, TXID_SIZE);
-    apr_base64_encode (txid, (const char*)salt, TXID_SIZE);
-
-    for(i=0;i<TXID_SIZE;i++)        {
-        if((salt[i] >= 0x30) && (salt[i] <= 0x39))      {}
-        else if((salt[i] >= 0x40) && (salt[i] <= 0x5A)) {}
-        else if((salt[i] >= 0x61) && (salt[i] <= 0x7A)) {}
-        else {
-            if((i%2)==0)
-                salt[i] = 0x41;
-            else
-                salt[i] = 0x63;
-        }
-    }
-
-    salt[TXID_SIZE-1] = '\0';
-
-    apr_table_setn(ctx->req->subprocess_env, "UNIQUE_ID", apr_psprintf(ctx->req->pool, "%s", salt));
-
+    
+    timestamp = clock();
+    if(asa!=NULL && asa->hostname!=NULL)
+        apr_table_setn(ctx->req->subprocess_env, "UNIQUE_ID", apr_psprintf(ctx->req->pool, "%*s_%0*d_%0*ld",TXID_HOSTNAME_SIZE, asa->hostname,TXID_INT_SIZE, local_cnt,TXID_INT_SIZE, (long)timestamp));
+    else
+        apr_table_setn(ctx->req->subprocess_env, "UNIQUE_ID", apr_psprintf(ctx->req->pool, "%*s_%0*d_%0*ld",TXID_HOSTNAME_SIZE, default_hostname,TXID_INT_SIZE, local_cnt,TXID_INT_SIZE, (long)timestamp));
+    
     ctx->brigade = apr_brigade_create(ctx->req->pool, ctx->req->connection->bucket_alloc);
 
     if (ctx->brigade == NULL) {

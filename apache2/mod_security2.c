@@ -502,11 +502,10 @@ static modsec_rec *create_tx_context(request_rec *r) {
      * it using the directory config we just
      * got from Apache.
      */
-    msr->txcfg = create_directory_config(msr->mp, NULL);
-    if (msr->txcfg == NULL) return NULL;
+    
 
     if (msr->dcfg1 != NULL) {
-        msr->txcfg = merge_directory_configs(msr->mp, msr->txcfg, msr->dcfg1);
+        msr->txcfg = create_and_merge_directory_configs(msr->mp, msr->dcfg1);
         if (msr->txcfg == NULL) return NULL;
     }
     init_directory_config(msr->txcfg);
