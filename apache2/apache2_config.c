@@ -866,6 +866,146 @@ void init_directory_config(directory_config *dcfg)
 
 }
 
+const char* preprocessor_rule_op_lt(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule) {
+
+    msc_string str;
+    str.value = (char*)rule->op_param;
+    str.value_len = strlen(str.value);
+
+    rule->op_lt_opt.preprocessor_var_value = preprocessor_expand_macros(msr, &str, rule, cmd->pool);
+    switch(rule->op_lt_opt.preprocessor_var_value) {
+    case 0: { // partial or none is expanded
+    case 1:   // all are expanded
+            rule->op_lt_opt.var_value = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            rule->op_lt_opt.var_value->value = apr_pstrdup(cmd->pool, str.value);
+            rule->op_lt_opt.var_value->value_len = str.value_len;
+        }
+        break;
+
+    default: { // critical error
+            return "ModSecurity: preprocessor_rule_op_lt critical error. ";
+        }
+        break;
+    }
+
+    return NULL;
+}
+
+const char* preprocessor_rule_op_eq(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule) {
+
+    msc_string str;
+    str.value = (char*)rule->op_param;
+    str.value_len = strlen(str.value);
+
+    rule->op_eq_opt.preprocessor_var_value = preprocessor_expand_macros(msr, &str, rule, cmd->pool);
+    switch(rule->op_eq_opt.preprocessor_var_value) {
+    case 0: { // partial or none is expanded
+    case 1:   // all are expanded
+            rule->op_eq_opt.var_value = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            rule->op_eq_opt.var_value->value = apr_pstrdup(cmd->pool, str.value);
+            rule->op_eq_opt.var_value->value_len = str.value_len;
+        }
+        break;
+
+    default: { // critical error
+            return "ModSecurity: preprocessor_rule_op_eq critical error. ";
+        }
+        break;
+    }
+
+    return NULL;
+}
+
+const char* preprocessor_action_setvar(cmd_parms *cmd, modsec_rec *msr, msre_rule *rule, msre_action *action) {
+
+    char *data = apr_pstrdup(msr->mp, action->param);
+    char *var_name = NULL, *var_value = NULL;
+    char *s = NULL;
+    msc_string* var;
+
+    /* Extract the name and the value. */
+    /* IMP1 We have a function for this now, parse_name_eq_value? */
+    s = strstr(data, "=");
+    if (s == NULL) {
+        var_name = data;
+        var_value = "1";
+    } else {
+        var_name = data;
+        var_value = s + 1;
+        *s = '\0';
+
+        while ((*var_value != '\0')&&(isspace(*var_value))) var_value++;
+    }
+
+    var = apr_palloc(msr->mp, sizeof(msc_string));
+    var->value = var_name;
+    var->value_len = strlen(var->value);
+    action->setvar_opt.preprocessor_var_name = preprocessor_expand_macros(msr, var, rule, msr->mp);
+    switch(action->setvar_opt.preprocessor_var_name) {
+    case 0: { // partial or none is expanded
+            action->setvar_opt.var_name = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            action->setvar_opt.var_name->value = apr_pstrdup(cmd->pool, var->value);
+            action->setvar_opt.var_name->value_len = var->value_len;
+        }
+        break;
+
+    case 1: { // all are expanded
+            char* col_name = NULL;
+
+            var_name = log_escape_nq_ex(cmd->pool, var->value, var->value_len);
+
+            if (var_name != NULL && var_name[0] == '!') {
+                var_name = var_name + 1;
+                action->setvar_opt.is_negated = 1;
+            }
+
+            s = strstr(var_name, ".");
+            if (s == NULL)
+                return apr_psprintf(cmd->pool, "ModSecurity: Asked to set variable \"%s\", but no collection name specified. ",
+                    log_escape(msr->mp, var_name));
+
+            col_name = var_name;
+            var_name = s + 1;
+            *s = '\0';
+
+            action->setvar_opt.col_name = apr_pstrdup(cmd->pool, col_name);
+            action->setvar_opt.var_name = apr_pcalloc(cmd->pool, sizeof(msc_string));
+            action->setvar_opt.var_name->value = var_name;
+            action->setvar_opt.var_name->value_len = strlen(var_name);
+        }
+        break;
+
+    default: { // critical error
+            return "ModSecurity: preprocessor_action_setvar critical error. ";
+        }
+        break;
+    }
+
+
+    if (!action->setvar_opt.is_negated) {
+        var->value = var_value;
+        var->value_len = strlen(var->value);
+        action->setvar_opt.preprocessor_var_value = preprocessor_expand_macros(msr, var, rule, msr->mp);
+        switch(action->setvar_opt.preprocessor_var_value) {
+        case 0: { // partial or none is expanded
+        case 1:   // all are expanded
+                action->setvar_opt.var_value = apr_pcalloc(cmd->pool, sizeof(msc_string));
+                action->setvar_opt.var_value->value = apr_pstrdup(cmd->pool, var->value);
+                action->setvar_opt.var_value->value_len = var->value_len;
+            }
+            break;
+
+        default: { // critical error
+                return "ModSecurity: preprocessor_action_setvar critical error. ";
+            }
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+
 /**
  *
  */
@@ -1038,48 +1178,7 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
             dcfg->tmp_chain_starter = rule;
         }
     }
-        {
-        const apr_array_header_t *tarr;
-        const apr_table_entry_t *telts;
-        int i;
-        
-        rule->actionset->t_actions = apr_table_make(cmd->pool, 25);
-        if (!rule->actionset->t_actions)
-            return FATAL_ERROR;
-        
-        rule->actionset->nondisruptive_actions = apr_table_make(cmd->pool, 25);
-        if (!rule->actionset->nondisruptive_actions) {
-            return FATAL_ERROR;
-        }
-        
-        rule->actionset->disruptive_actions = apr_table_make(cmd->pool, 25);
-        if (!rule->actionset->disruptive_actions)
-            return FATAL_ERROR;
-        
-        tarr = apr_table_elts(rule->actionset->actions);
-        telts = (const apr_table_entry_t*)tarr->elts;
-        for (i = 0; i < tarr->nelts; i++) {
-            msre_action *action = (msre_action *)telts[i].val;
-            if (!strcmp(telts[i].key, "t")) {
-                if (!strcmp(action->param, "none")) {
-                    apr_table_clear(rule->actionset->t_actions);
-                    continue;
-                }
-                apr_table_addn(rule->actionset->t_actions, telts[i].key, (void *)action);
-                continue;
-            }
-            else
-            if (action->metadata->type == ACTION_NON_DISRUPTIVE) {
-                if (action->metadata->execute != NULL)
-                    apr_table_addn(rule->actionset->nondisruptive_actions, telts[i].key, (void *)action);
-            }
-            else
-            if (action->metadata->type == ACTION_DISRUPTIVE) {
-                if (action->metadata->execute != NULL)
-                    apr_table_addn(rule->actionset->disruptive_actions, telts[i].key, (void *)action);
-            }
-        }
-    }
+
     /* Create skip table if one does not already exist. */
     if (dcfg->tmp_rule_placeholders == NULL) {
         dcfg->tmp_rule_placeholders = apr_table_make(cmd->pool, 10);
@@ -1136,6 +1235,76 @@ static const char *add_rule(cmd_parms *cmd, directory_config *dcfg, int type,
 
     /* Update the unparsed rule */
     rule->unparsed = msre_rule_generate_unparsed(dcfg->ruleset->mp, rule, NULL, NULL, NULL);
+
+    {
+        modsec_rec msr = { 0 };
+        const apr_array_header_t *tarr;
+        const apr_table_entry_t *telts;
+        int i;
+
+        apr_pool_create(&msr.mp, NULL);
+        msr.modsecurity = modsecurity;
+        msr.matched_var = apr_pcalloc(msr.mp, sizeof(msc_string));
+        msr.tx_vars = apr_table_make(msr.mp, 0);
+        msr.collections = apr_table_make(msr.mp, 0);
+
+        rule->actionset->t_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->t_actions)
+            return FATAL_ERROR;
+
+        rule->actionset->nondisruptive_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->nondisruptive_actions) {
+            return FATAL_ERROR;
+        }
+
+        rule->actionset->disruptive_actions = apr_table_make(cmd->pool, 25);
+        if (!rule->actionset->disruptive_actions)
+            return FATAL_ERROR;
+
+        if (!strcmp(rule->op_name, "lt")) {
+            const char* err = preprocessor_rule_op_lt(cmd, &msr, rule);
+            if (err)
+                return err;
+        }
+        else
+        if (!strcmp(rule->op_name, "eq")) {
+            const char* err = preprocessor_rule_op_eq(cmd, &msr, rule);
+            if (err)
+                return err;
+        }
+
+        tarr = apr_table_elts(rule->actionset->actions);
+        telts = (const apr_table_entry_t*)tarr->elts;
+        for (i = 0; i < tarr->nelts; i++) {
+            msre_action *action = (msre_action *)telts[i].val;
+            if (!strcmp(telts[i].key, "t")) {
+                if (!strcmp(action->param, "none")) {
+                    apr_table_clear(rule->actionset->t_actions);
+                    continue;
+                }
+                apr_table_addn(rule->actionset->t_actions, telts[i].key, (void *)action);
+                continue;
+            }
+            else
+            if (action->metadata->type == ACTION_NON_DISRUPTIVE) {
+                if (action->metadata->execute != NULL) {
+                    if (!strcmp(telts[i].key, "setvar")) {
+                        const char* err = preprocessor_action_setvar(cmd, &msr, rule, action);
+                        if (err)
+                            return err;
+                    }
+                    apr_table_addn(rule->actionset->nondisruptive_actions, telts[i].key, (void *)action);
+                }
+            }
+            else
+            if (action->metadata->type == ACTION_DISRUPTIVE) {
+                if (action->metadata->execute != NULL)
+                    apr_table_addn(rule->actionset->disruptive_actions, telts[i].key, (void *)action);
+            }
+        }
+
+        apr_pool_destroy(msr.mp);
+    }
 
     return NULL;
 }

@@ -391,7 +391,7 @@ static int l_setvar(lua_State *L) {
         return -1;
     }
 
-    return msre_action_setvar_execute(msr,msr->msc_rule_mptmp,rule,(char *)var_name,(char *)var_value);
+    return msre_action_setvar_execute(msr,msr->msc_rule_mptmp,rule,NULL,(char *)var_name,(char *)var_value);
 }
 
 static const struct luaL_Reg mylib[] = {

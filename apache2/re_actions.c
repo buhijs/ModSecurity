@@ -310,6 +310,146 @@ int expand_macros(modsec_rec *msr, msc_string *var, msre_rule *rule, apr_pool_t 
     return 1;
 }
 
+int preprocessor_expand_macros(modsec_rec *msr, msc_string *var, msre_rule *rule, apr_pool_t *mptmp) {
+
+    char *data = NULL;
+    apr_array_header_t *arr = NULL;
+    char *p = NULL, *q = NULL, *t = NULL;
+    char *text_start = NULL, *next_text_start = NULL;
+    msc_string *part = NULL;
+    int i, offset = 0;
+    int result = 1;
+
+    if (var->value == NULL) return 0;
+
+    /* IMP1 Duplicate the string and create the array on
+     *      demand, thus not having to do it if there are
+     *      no macros in the input data.
+     */
+
+    data = apr_pstrdup(mptmp, var->value); /* IMP1 Are we modifying data anywhere? */
+    arr = apr_array_make(mptmp, 16, sizeof(msc_string *));
+    if ((data == NULL)||(arr == NULL)) return -1;
+
+    text_start = next_text_start = data;
+    do {
+        text_start = next_text_start;
+        p = strstr(text_start, "%");
+        if (p != NULL) {
+            char *param_name = NULL;
+            char *var_name = NULL;
+            char *var_value = NULL;
+
+            if ((*(p + 1) == '{')&&(*(p + 2) != '\0')) {
+                char* param_start = p;
+                char *var_start = p + 2;
+
+                t = var_start;
+                while((*t != '\0')&&(*t != '}')) t++;
+                if (*t == '}') {
+                    param_name = apr_pstrmemdup(mptmp, param_start, t - p + 1);
+                    /* Named variable. */
+
+                    var_name = apr_pstrmemdup(mptmp, var_start, t - var_start);
+                    q = strstr(var_name, ".");
+                    if (q != NULL) {
+                        var_value = q + 1;
+                        *q = '\0';
+                    }
+
+                    next_text_start = t + 1; /* *t was '}' */
+                } else {
+
+                    next_text_start = t; /* *t was '\0' */
+                }
+            }
+
+            if (var_name != NULL) {
+                char *my_error_msg = NULL;
+                msre_var *var_generated = NULL;
+                msre_var *var_resolved = NULL;
+
+                /* Add the text part before the macro to the array. */
+                part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+                if (part == NULL) return -1;
+                part->value_len = p - text_start;
+                part->value = apr_pstrmemdup(mptmp, text_start, part->value_len);
+                *(msc_string **)apr_array_push(arr) = part;
+
+                /* Resolve the macro and add that to the array. */
+                var_resolved = msre_create_var_ex(mptmp, msr->modsecurity->msre, var_name, var_value,
+                    msr, &my_error_msg);
+                if (var_resolved != NULL) {
+                    var_generated = generate_single_var(msr, var_resolved, NULL, rule, mptmp);
+                    if (var_generated != NULL) {
+                        part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+                        if (part == NULL) return -1;
+                        part->value_len = var_generated->value_len;
+                        part->value = (char *)var_generated->value;
+                        *(msc_string **)apr_array_push(arr) = part;
+                    }
+                    else {
+                        part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+                        part->value = param_name;
+                        part->value_len = strlen(param_name);
+                        *(msc_string **)apr_array_push(arr) = part;
+                        result = 0;
+                    }
+                } else {
+                    part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+                    part->value = param_name;
+                    part->value_len = strlen(param_name);
+                    *(msc_string **)apr_array_push(arr) = part;
+                    result = 0;
+                }
+            } else {
+                /* We could not identify a valid macro so add it as text. */
+                part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+                if (part == NULL) return -1;
+                part->value_len = p - text_start + 1; /* len(text)+len("%") */
+                part->value = apr_pstrmemdup(mptmp, text_start, part->value_len);
+                *(msc_string **)apr_array_push(arr) = part;
+
+                next_text_start = p + 1;
+            }
+        } else {
+            /* Text part. */
+            part = (msc_string *)apr_pcalloc(mptmp, sizeof(msc_string));
+            part->value = apr_pstrdup(mptmp, text_start);
+            part->value_len = strlen(part->value);
+            *(msc_string **)apr_array_push(arr) = part;
+        }
+    } while (p != NULL);
+
+    /* If there's more than one member of the array that
+     * means there was at least one macro present. Combine
+     * text parts into a single string now.
+     */
+    if (arr->nelts > 1) {
+        /* Figure out the required size for the string. */
+        var->value_len = 0;
+        for(i = 0; i < arr->nelts; i++) {
+            part = ((msc_string **)arr->elts)[i];
+            var->value_len += part->value_len;
+        }
+
+        /* Allocate the string. */
+        var->value = apr_palloc(msr->mp, var->value_len + 1);
+        if (var->value == NULL) return -1;
+
+        /* Combine the parts. */
+        offset = 0;
+        for(i = 0; i < arr->nelts; i++) {
+            part = ((msc_string **)arr->elts)[i];
+            memcpy((char *)(var->value + offset), part->value, part->value_len);
+            offset += part->value_len;
+        }
+        var->value[offset] = '\0';
+    }
+
+    return result;
+}
+
 /**
  * Record the original collection values to use to calculate deltas.
  * This can be called multiple times and will not overwrite the first
@@ -1513,7 +1653,7 @@ static apr_status_t msre_action_setenv_execute(modsec_rec *msr, apr_pool_t *mptm
 
 /* setvar */
 apr_status_t msre_action_setvar_execute(modsec_rec *msr, apr_pool_t *mptmp,
-    msre_rule *rule, char *var_name, char *var_value)
+    msre_rule *rule, msre_action *action, char *var_name, char *var_value)
 {
     char *col_name = NULL;
     char *s = NULL;
@@ -1531,36 +1671,45 @@ apr_status_t msre_action_setvar_execute(modsec_rec *msr, apr_pool_t *mptmp,
         msr_log(msr, 1, "Failed to allocate space to expand name macros");
         return -1;
     }
-    var->value = var_name;
-    var->value_len = strlen(var->value);
-    expand_macros(msr, var, rule, mptmp);
-    var_name = log_escape_nq_ex(msr->mp, var->value, var->value_len);
 
-    /* Handle the exclamation mark. */
-    if (var_name != NULL && var_name[0] == '!') {
-        var_name = var_name + 1;
-        is_negated = 1;
-    }
+    if (!action || !action->setvar_opt.preprocessor_var_name) {
 
-    /* ENH Not possible to use ! and = at the same time. */
-    /* ENH Not possible to change variable "KEY".        */
+        var->value = var_name;
+        var->value_len = strlen(var->value);
+        expand_macros(msr, var, rule, mptmp);
+        var_name = log_escape_nq_ex(msr->mp, var->value, var->value_len);
 
-    /* Figure out the collection name. */
-    target_col = msr->tx_vars;
-    s = strstr(var_name, ".");
-    if (s == NULL) {
-        if (msr->txcfg->debuglog_level >= 3) {
-            msr_log(msr, 3, "Asked to set variable \"%s\", but no collection name specified. ",
-                log_escape(msr->mp, var_name));
+        /* Handle the exclamation mark. */
+        if (var_name != NULL && var_name[0] == '!') {
+            var_name = var_name + 1;
+            is_negated = 1;
         }
 
-        return 0;
+        /* ENH Not possible to use ! and = at the same time. */
+        /* ENH Not possible to change variable "KEY".        */
+
+        /* Figure out the collection name. */
+        target_col = msr->tx_vars;
+        s = strstr(var_name, ".");
+        if (s == NULL) {
+            if (msr->txcfg->debuglog_level >= 3) {
+                msr_log(msr, 3, "Asked to set variable \"%s\", but no collection name specified. ",
+                    log_escape(msr->mp, var_name));
+            }
+
+            return 0;
+        }
+
+        col_name = var_name;
+        var_name = s + 1;
+        *s = '\0';
+
     }
-
-    col_name = var_name;
-    var_name = s + 1;
-    *s = '\0';
-
+    else {
+        is_negated = action->setvar_opt.is_negated;
+        col_name = action->setvar_opt.col_name;
+    }
+    
     /* Locate the collection. */
     if (strcasecmp(col_name, "tx") == 0) { /* Special case for TX variables. */
         target_col = msr->tx_vars;
@@ -1619,10 +1768,15 @@ apr_status_t msre_action_setvar_execute(modsec_rec *msr, apr_pool_t *mptmp,
             collection_original_setvar(msr, col_name, rec);
 
             /* Expand values in value */
-            val->value = var_value;
-            val->value_len = strlen(val->value);
-            expand_macros(msr, val, rule, mptmp);
-            var_value = val->value;
+            if (!action || !action->setvar_opt.preprocessor_var_value) {
+                val->value = var_value;
+                val->value_len = strlen(val->value);
+                expand_macros(msr, val, rule, mptmp);
+                var_value = val->value;
+            }
+            else {
+                var_value = action->setvar_opt.var_value->value;
+            }
 
             if (msr->txcfg->debuglog_level >= 9) {
                 msr_log(msr, 9, "Relative change: %s=%d%s", var_name, value, var_value);
@@ -1650,7 +1804,9 @@ apr_status_t msre_action_setvar_execute(modsec_rec *msr, apr_pool_t *mptmp,
             var->name_len = strlen(var->name);
             var->value = apr_pstrdup(msr->mp, var_value);
             var->value_len = strlen(var->value);
-            expand_macros(msr, var, rule, mptmp);
+            if (!action || !action->setvar_opt.preprocessor_var_value) {
+                expand_macros(msr, var, rule, mptmp);
+            }
             apr_table_setn(target_col, var->name, (void *)var);
 
             if (msr->txcfg->debuglog_level >= 9) {
@@ -1685,6 +1841,8 @@ apr_status_t msre_action_setvar_execute(modsec_rec *msr, apr_pool_t *mptmp,
 static apr_status_t msre_action_setvar_parse(modsec_rec *msr, apr_pool_t *mptmp,
     msre_rule *rule, msre_action *action)
 {
+    return msre_action_setvar_execute(msr, mptmp, rule, action, action->setvar_opt.var_name->value, action->setvar_opt.var_value->value);
+
     char *data = apr_pstrdup(mptmp, action->param);
     char *var_name = NULL, *var_value = NULL;
     char *s = NULL;
@@ -1703,7 +1861,7 @@ static apr_status_t msre_action_setvar_parse(modsec_rec *msr, apr_pool_t *mptmp,
         while ((*var_value != '\0')&&(isspace(*var_value))) var_value++;
     }
 
-    return msre_action_setvar_execute(msr,mptmp,rule,var_name,var_value);
+    return msre_action_setvar_execute(msr,mptmp,rule,action,var_name,var_value);
 }
 
 /* expirevar */
