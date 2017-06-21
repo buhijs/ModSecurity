@@ -19,6 +19,10 @@
 #define POSITIVE_VALUE 1
 #define NEGATIVE_VALUE 2
 
+/* definition for bitmap of rules */
+#define BITS_PER_PHASE  512
+#define RULE_PHASES     5
+
 typedef struct msre_engine msre_engine;
 typedef struct msre_ruleset msre_ruleset;
 typedef struct msre_ruleset_internal msre_ruleset_internal;
@@ -154,7 +158,7 @@ struct msre_rule {
     int                      placeholder;
     int                      type;
     int                      skipafter_marker_index;
-
+    
     msre_ruleset            *ruleset;
     msre_rule               *chain_starter;
     #if defined(PERFORMANCE_MEASUREMENT)
@@ -316,6 +320,7 @@ struct msre_actionset {
 	apr_table_t             *t_actions;
     apr_table_t             *nondisruptive_actions;
     apr_table_t             *disruptive_actions;
+    unsigned int            *removed_rules_bitmap;
 };
 
 void DSOLOCAL msre_engine_variable_register(msre_engine *engine, const char *name,
@@ -423,5 +428,10 @@ struct fuzzy_hash_param_data {
     struct fuzzy_hash_chunk *head;
     int threshold;
 };
+
+/* -- Helper Functions -- */
+unsigned int check_removed_rules_bitmap(unsigned int *bitmap, int phase, int index);
+int set_removed_rules_bitmap(unsigned int *bitmap, int phase, int index);
+int merge_removed_rules_bitmap(unsigned int *msr_bitmap, unsigned int *action_bitmap);
 
 #endif

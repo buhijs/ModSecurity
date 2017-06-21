@@ -448,6 +448,7 @@ struct modsec_rec {
     apr_array_header_t  *removed_rules;
     apr_array_header_t  *removed_rules_tag;
     apr_array_header_t  *removed_rules_msg;
+    unsigned int        *removed_rules_bitmap;
 
     /* removed targets */
     apr_table_t         *removed_targets;
