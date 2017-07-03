@@ -1010,6 +1010,184 @@ const char *populate_include_files(apr_pool_t *p, apr_pool_t *ptemp, apr_array_h
 	return process_fnmatch_configs(ari, fname, p, ptemp, optional);
 }
 
+void update_skipafter_marker_index(apr_array_header_t *ruleset_arr){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    apr_array_header_t *action_tarr = NULL;
+    apr_table_entry_t *action_telts = NULL;
+    const char *marker = NULL;
+    int i,j;
+
+    for(i=0; i< ruleset_arr->nelts; i++){
+        msre_rule *rule = rules[i];
+        action_tarr = apr_table_elts(rule->actionset->actions);
+        action_telts = (apr_table_entry_t *)action_tarr->elts;
+
+        for(j = 0; j < action_tarr->nelts; j++){
+            msre_action *action = (msre_action *)action_telts[j].val;
+            /* Let's find out skipAfter action. */
+            if(strcmp(action->metadata->name, "skipAfter") == 0){
+                marker = action->param;
+                rule->skipafter_marker_index = find_skipafter_marker_index(ruleset_arr, i, marker);
+            }
+        }
+    }
+}
+
+int find_skipafter_marker_index(apr_array_header_t *ruleset_arr, int index, const char* marker){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    int i;
+    for(i = index; i < ruleset_arr->nelts; i++){
+        if(rules[i]->actionset->id == NULL)
+            continue;
+        if(strcmp(rules[i]->actionset->id, marker) == 0)
+            return i;
+    }
+    return NOT_SET;
+}
+
+/*
+ * The id here could be one id or a range.
+ * Example: ctl:ruleRemoveById=942430
+ * Example: ctl:ruleRemoveById=9001200-9001299
+ */
+int find_removed_rules_by_id_in_ruleset(apr_array_header_t *ruleset_arr, char *id, int phase, unsigned int *removed_rules_bitmap){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    int i;
+    int rule_id = -1;
+    for(i = 0; i < ruleset_arr->nelts; i++){
+        if(rules[i]->placeholder != RULE_PH_NONE)
+            continue;
+        /* id == NULL, it could be a part of a chain */
+        if(rules[i]->actionset->id == NULL){
+            if(rules[i]->chain_starter != NULL)
+                rule_id = atoi(rules[i]->chain_starter->actionset->id);
+        }else{
+            rule_id = atoi(rules[i]->actionset->id);
+        }
+        if(rule_id == -1)
+            continue;
+        if(rule_id_in_range(rule_id, id))
+            set_removed_rules_bitmap(removed_rules_bitmap, phase, i);
+    }
+    return 0;
+}
+
+int find_removed_rules_by_msg_in_ruleset(apr_pool_t *mptemp, apr_array_header_t *ruleset_arr, char *msg, int phase, unsigned int *removed_rules_bitmap){
+    msre_rule **rules = (msre_rule **)ruleset_arr->elts;
+    int i;
+    int rc;
+    char *rule_msg = NULL;
+    char *my_error_msg = NULL;
+    msc_regex_t *regx_param = NULL;
+    for(i = 0; i < ruleset_arr->nelts; i++){
+        /* if it's a chined rule without msg, we will check its chain starter's msg */
+        if(rules[i]->actionset->msg == NULL){
+            if(rules[i]->chain_starter != NULL && rules[i]->chain_starter->actionset->msg != NULL)
+                rule_msg = rules[i]->chain_starter->actionset->msg;
+        }else{
+            rule_msg = rules[i]->actionset->msg;
+        }
+        if(rule_msg == NULL)
+            continue;
+        regx_param = msc_pregcomp(mptemp, msg, 0, NULL, NULL);
+        rc = msc_regexec(regx_param, rule_msg, strlen(rule_msg), &my_error_msg);
+        if(rc >= 0)
+            set_removed_rules_bitmap(removed_rules_bitmap, phase, i);
+    }
+}
+
+/*
+ * The id here could be one id or a range.
+ * Example: ctl:ruleRemoveById=942430
+ * Example: ctl:ruleRemoveById=9001200-9001299
+ */
+int find_removed_rules_by_id(msre_ruleset *ruleset, char *id, int phase, unsigned int *removed_rules_bitmap){
+    switch(phase){
+        case PHASE_REQUEST_HEADERS : 
+            find_removed_rules_by_id_in_ruleset(ruleset->phase_request_headers, id, PHASE_REQUEST_HEADERS, removed_rules_bitmap);
+        case PHASE_REQUEST_BODY : 
+            find_removed_rules_by_id_in_ruleset(ruleset->phase_request_body, id, PHASE_REQUEST_BODY, removed_rules_bitmap);
+        case PHASE_RESPONSE_HEADERS : 
+            find_removed_rules_by_id_in_ruleset(ruleset->phase_response_headers, id, PHASE_RESPONSE_HEADERS, removed_rules_bitmap);
+        case PHASE_RESPONSE_BODY : 
+            find_removed_rules_by_id_in_ruleset(ruleset->phase_response_body, id, PHASE_RESPONSE_BODY, removed_rules_bitmap);
+        case PHASE_LOGGING : 
+            find_removed_rules_by_id_in_ruleset(ruleset->phase_logging, id, PHASE_LOGGING, removed_rules_bitmap);
+        default : break;
+    }
+    return 0;
+}
+
+int find_removed_rules_by_tag(msre_ruleset *ruleset, char *tag, int phase, unsigned int *removed_rules_bitmap){
+    return 0;
+}
+
+int find_removed_rules_by_msg(apr_pool_t *mptemp, msre_ruleset *ruleset, char *msg, int phase, unsigned int *removed_rules_bitmap){
+    switch(phase){
+        case PHASE_REQUEST_HEADERS : 
+            find_removed_rules_by_msg_in_ruleset(mptemp, ruleset->phase_request_headers, msg, PHASE_REQUEST_HEADERS, removed_rules_bitmap);
+        case PHASE_REQUEST_BODY : 
+            find_removed_rules_by_msg_in_ruleset(mptemp, ruleset->phase_request_body, msg, PHASE_REQUEST_BODY, removed_rules_bitmap);
+        case PHASE_RESPONSE_HEADERS : 
+            find_removed_rules_by_msg_in_ruleset(mptemp, ruleset->phase_response_headers, msg, PHASE_RESPONSE_HEADERS, removed_rules_bitmap);
+        case PHASE_RESPONSE_BODY : 
+            find_removed_rules_by_msg_in_ruleset(mptemp, ruleset->phase_response_body, msg, PHASE_RESPONSE_BODY, removed_rules_bitmap);
+        case PHASE_LOGGING : 
+            find_removed_rules_by_msg_in_ruleset(mptemp, ruleset->phase_logging, msg, PHASE_LOGGING, removed_rules_bitmap);
+        default : break;
+    }
+    return 0;
+}
+
+int find_ctl_rule_removed_action(apr_pool_t *mptemp, msre_ruleset *ruleset, int phase){
+    msre_rule **rules = NULL;
+    apr_array_header_t *ruleset_arr = NULL;
+    apr_array_header_t *action_tarr = NULL;
+    apr_table_entry_t *action_telts = NULL;
+    char *id = NULL;
+    int i,j;
+    char *name = NULL;
+    char *value = NULL;
+
+    switch(phase){
+        case PHASE_REQUEST_HEADERS : ruleset_arr = ruleset->phase_request_headers; break;
+        case PHASE_REQUEST_BODY : ruleset_arr = ruleset->phase_request_body; break;
+        case PHASE_RESPONSE_HEADERS : ruleset_arr = ruleset->phase_response_headers; break;
+        case PHASE_RESPONSE_BODY : ruleset_arr = ruleset->phase_response_body; break;
+        case PHASE_LOGGING : ruleset_arr = ruleset->phase_logging; break;
+        default : break;
+    }
+
+    rules = (msre_rule **)ruleset_arr->elts;
+    for(i=0; i< ruleset_arr->nelts; i++){
+        msre_rule *rule = rules[i];
+        action_tarr = apr_table_elts(rule->actionset->actions);
+        action_telts = (apr_table_entry_t *)action_tarr->elts;
+        for(j = 0; j < action_tarr->nelts; j++){
+            msre_action *action = (msre_action *)action_telts[j].val;
+            /* Let's find out skipAfter action. */
+            if(strcmp(action->metadata->name, "ctl") == 0){
+                /* parse the name, value of ctl action */
+                if (parse_name_eq_value(mptemp, action->param, &name, &value) < 0) 
+                    return -1;
+                if(value == NULL)
+                    return -1;
+                if (strcasecmp(name, "ruleRemoveById") == 0) {
+                    find_removed_rules_by_id(ruleset, value, phase, rule->actionset->removed_rules_bitmap);
+                }
+                if (strcasecmp(name, "ruleRemoveByTag") == 0) {
+                    //TODO: here we have a expand_macro
+                    //find_removed_rules_by_tag(ruleset, value, phase, rule->actionset->removed_rules_bitmap);
+                }
+                if (strcasecmp(name, "ruleRemoveByMsg") == 0) {
+                    find_removed_rules_by_msg(mptemp, ruleset, value, phase, rule->actionset->removed_rules_bitmap);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 const char *process_command_config(server_rec *s,
                                           void *mconfig,
                                           apr_pool_t *p,
@@ -1189,6 +1367,18 @@ ProcessInclude:
 							parms->config_file->line_number, errmsg);
 		else
 			apr_snprintf(err, 1024, "Syntax error in config file: %s", errmsg);
+    }else{
+        msre_ruleset* ruleset = ((directory_config *)mconfig)->ruleset;
+        update_skipafter_marker_index(ruleset->phase_request_headers);
+        update_skipafter_marker_index(ruleset->phase_request_body);
+        update_skipafter_marker_index(ruleset->phase_response_headers);
+        update_skipafter_marker_index(ruleset->phase_response_body);
+        update_skipafter_marker_index(ruleset->phase_logging);
+        find_ctl_rule_removed_action(ptemp, ruleset, PHASE_REQUEST_HEADERS);
+        find_ctl_rule_removed_action(ptemp, ruleset, PHASE_REQUEST_BODY);
+        find_ctl_rule_removed_action(ptemp, ruleset, PHASE_RESPONSE_HEADERS);
+        find_ctl_rule_removed_action(ptemp, ruleset, PHASE_RESPONSE_BODY);
+        find_ctl_rule_removed_action(ptemp, ruleset, PHASE_LOGGING);
     }
 
     errmsg = err;
@@ -1201,3 +1391,4 @@ Exit:
 
 	return errmsg;
 }
+

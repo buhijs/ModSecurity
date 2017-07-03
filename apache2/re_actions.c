@@ -1171,7 +1171,8 @@ static apr_status_t msre_action_ctl_execute(modsec_rec *msr, apr_pool_t *mptmp,
         return 1;
     } else
     if (strcasecmp(name, "ruleRemoveById") == 0) {
-        *(const char **)apr_array_push(msr->removed_rules) = (const char *)apr_pstrdup(msr->mp, value);
+        //*(const char **)apr_array_push(msr->removed_rules) = (const char *)apr_pstrdup(msr->mp, value);
+        merge_removed_rules_bitmap(msr->removed_rules_bitmap, rule->actionset->removed_rules_bitmap);
 
         if (msr->txcfg->debuglog_level >= 4) {
             msr_log(msr, 4, "Ctl: Removed rule by id : %s.", value);
@@ -1197,6 +1198,9 @@ static apr_status_t msre_action_ctl_execute(modsec_rec *msr, apr_pool_t *mptmp,
         return 1;
     } else
     if (strcasecmp(name, "ruleRemoveByMsg") == 0) {
+        merge_removed_rules_bitmap(msr->removed_rules_bitmap, rule->actionset->removed_rules_bitmap);
+        return 1; 
+
         rule_exception *re = apr_pcalloc(msr->mp, sizeof(rule_exception));
         re->type = RULE_EXCEPTION_REMOVE_MSG;
         re->param = (const char *)apr_pstrdup(msr->mp, value);
