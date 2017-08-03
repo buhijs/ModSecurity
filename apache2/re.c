@@ -1227,7 +1227,7 @@ msre_actionset *msre_actionset_create(msre_engine *engine, apr_pool_t *mp, const
     actionset->nondisruptive_actions = NULL;
     actionset->disruptive_actions = NULL;
 
-    actionset->removed_rules_bitmap = (unsigned int *)apr_pcalloc(mp, BITS_PER_PHASE * RULE_PHASES / 32 + 1);
+    actionset->removed_rules_bitmap = (unsigned int *)apr_pcalloc(mp, (BITS_PER_PHASE * RULE_PHASES / BITMAP_UNIT_SIZE + 1) * sizeof(int));
     if (actionset->removed_rules_bitmap == NULL) return -1;
 
     /* Parse the list of actions, if it's present */
@@ -3418,21 +3418,21 @@ int rule_id_in_range(int ruleid, const char *range) {
 
 unsigned int check_removed_rules_bitmap(unsigned int *bitmap, int phase, int index){
     int bits = (phase - 1) * BITS_PER_PHASE + index;
-    int i = bits / 32;
-    int j = bits % 32;
+    int i = bits / BITMAP_UNIT_SIZE;
+    int j = bits % BITMAP_UNIT_SIZE;
     return (bitmap[i] >> j) & 1;
 }
 
 int set_removed_rules_bitmap(unsigned int *bitmap, int phase, int index){
     int bits = (phase - 1) * BITS_PER_PHASE + index;
-    int i = bits / 32;
-    int j = bits % 32;
+    int i = bits / BITMAP_UNIT_SIZE;
+    int j = bits % BITMAP_UNIT_SIZE;
     bitmap[i] |= (1 << j);
     return 0;
 }
 
 int merge_removed_rules_bitmap(unsigned int *msr_bitmap, unsigned int *action_bitmap){
-    int nums = BITS_PER_PHASE * RULE_PHASES / 32;
+    int nums = BITS_PER_PHASE * RULE_PHASES / BITMAP_UNIT_SIZE;
     int i;
     for(i = 0; i < nums; i++){
         msr_bitmap[i] |= action_bitmap[i];

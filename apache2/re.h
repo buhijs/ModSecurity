@@ -22,6 +22,7 @@
 /* definition for bitmap of rules */
 #define BITS_PER_PHASE  512
 #define RULE_PHASES     5
+#define BITMAP_UNIT_SIZE  (sizeof(int) * 8)
 
 typedef struct msre_engine msre_engine;
 typedef struct msre_ruleset msre_ruleset;

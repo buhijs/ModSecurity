@@ -507,7 +507,7 @@ apr_status_t modsecurity_tx_init(modsec_rec *msr) {
     msr->removed_rules_msg = apr_array_make(msr->mp, 16, sizeof(char *));
     if (msr->removed_rules_msg == NULL) return -1;
 
-    msr->removed_rules_bitmap = (unsigned int *)apr_pcalloc(msr->mp, BITS_PER_PHASE * RULE_PHASES / 32 + 1);
+    msr->removed_rules_bitmap = (unsigned int *)apr_pcalloc(msr->mp, (BITS_PER_PHASE * RULE_PHASES / BITMAP_UNIT_SIZE + 1) * sizeof(int));
     if (msr->removed_rules_bitmap == NULL) return -1;
 
     return 1;
